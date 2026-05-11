@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>APEX AI Server</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:#060f1a;color:#00b8ff;font-family:'Courier New',monospace;display:flex;align-items:center;justify-content:center;height:100vh}
+    .box{text-align:center;border:1px solid rgba(0,184,255,0.3);padding:50px 40px;border-radius:20px}
+    h1{font-size:2.5rem;letter-spacing:6px;margin-bottom:10px}
+    .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#00b8ff;margin-right:8px;animation:blink 1.5s infinite}
+    .status{font-size:0.85rem;margin-bottom:30px;display:flex;align-items:center;justify-content:center}
+    .info{color:#5a7a8a;font-size:0.75rem;line-height:2}
+    .info span{color:#00b8ff}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>⚡ APEX AI</h1>
+    <div class="status"><span class="dot"></span>Signal Server Online</div>
+    <div class="info">
+      <span>POST</span> /.netlify/functions/signal<br>
+      <span>GET</span> /.netlify/functions/signal
+    </div>
+  </div>
+</body>
+</html>
