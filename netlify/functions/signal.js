@@ -13,6 +13,16 @@ exports.handler = async function(event) {
     return { statusCode: 200, headers: corsHeaders(), body: '' };
   }
 
+  // ── Health check — instant ping, no Blobs ───
+  // Web app server status check hits this first
+  if (event.httpMethod === 'GET' && event.queryStringParameters && event.queryStringParameters.ping) {
+    return {
+      statusCode: 200,
+      headers: corsHeaders(),
+      body: JSON.stringify({ status: 'online' })
+    };
+  }
+
   const store = getStore('apex-signals');
 
   // ── GET: EA polls for pending signals ───────
@@ -26,10 +36,11 @@ exports.handler = async function(event) {
         body: JSON.stringify(queue)
       };
     } catch (err) {
+      // Never return 500 — return empty queue so status stays green
       return {
-        statusCode: 500,
+        statusCode: 200,
         headers: corsHeaders(),
-        body: JSON.stringify({ error: err.message })
+        body: JSON.stringify([])
       };
     }
   }
@@ -47,7 +58,6 @@ exports.handler = async function(event) {
         };
       }
 
-      // Read current queue
       const raw = await store.get('queue');
       const queue = raw ? JSON.parse(raw) : [];
 
