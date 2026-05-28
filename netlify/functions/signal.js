@@ -1,10 +1,11 @@
 // ─────────────────────────────────────────────
-//  APEX AI — Netlify Signal Bridge Function
-//  Uses Netlify Blobs — NO external services
-//  NO API keys needed. Just deploy and go.
+//  APEX AI — Netlify Signal Bridge
+//  Uses in-memory queue — no external storage
+//  Simple, fast, zero dependencies
 // ─────────────────────────────────────────────
 
-const { getStore } = require('@netlify/blobs');
+// In-memory signal queue (persists while function is warm)
+let signalQueue = [];
 
 exports.handler = async function(event) {
 
@@ -13,36 +14,22 @@ exports.handler = async function(event) {
     return { statusCode: 200, headers: corsHeaders(), body: '' };
   }
 
-  // ── Health check — instant ping, no Blobs ───
-  // Web app server status check hits this first
-  if (event.httpMethod === 'GET' && event.queryStringParameters && event.queryStringParameters.ping) {
+  // ── Health check / ping ──────────────────────
+  if (event.httpMethod === 'GET') {
+    const params = event.queryStringParameters || {};
+    if (params.ping) {
+      return {
+        statusCode: 200,
+        headers: corsHeaders(),
+        body: JSON.stringify({ status: 'online', queue: signalQueue.length })
+      };
+    }
+    // EA polls for pending signals
     return {
       statusCode: 200,
       headers: corsHeaders(),
-      body: JSON.stringify({ status: 'online' })
+      body: JSON.stringify(signalQueue)
     };
-  }
-
-  const store = getStore('apex-signals');
-
-  // ── GET: EA polls for pending signals ───────
-  if (event.httpMethod === 'GET') {
-    try {
-      const raw = await store.get('queue');
-      const queue = raw ? JSON.parse(raw) : [];
-      return {
-        statusCode: 200,
-        headers: corsHeaders(),
-        body: JSON.stringify(queue)
-      };
-    } catch (err) {
-      // Never return 500 — return empty queue so status stays green
-      return {
-        statusCode: 200,
-        headers: corsHeaders(),
-        body: JSON.stringify([])
-      };
-    }
   }
 
   // ── POST: Web app sends a new trade signal ──
@@ -58,9 +45,6 @@ exports.handler = async function(event) {
         };
       }
 
-      const raw = await store.get('queue');
-      const queue = raw ? JSON.parse(raw) : [];
-
       const newSignal = {
         id: Date.now().toString(),
         symbol: signal.symbol,
@@ -75,8 +59,10 @@ exports.handler = async function(event) {
         status: 'PENDING'
       };
 
-      queue.push(newSignal);
-      await store.set('queue', JSON.stringify(queue));
+      signalQueue.push(newSignal);
+
+      // Keep queue max 50 signals
+      if (signalQueue.length > 50) signalQueue = signalQueue.slice(-50);
 
       return {
         statusCode: 200,
@@ -97,17 +83,12 @@ exports.handler = async function(event) {
   if (event.httpMethod === 'DELETE') {
     try {
       const { id } = JSON.parse(event.body);
-
-      const raw = await store.get('queue');
-      const queue = raw ? JSON.parse(raw).filter(s => s.id !== id) : [];
-      await store.set('queue', JSON.stringify(queue));
-
+      signalQueue = signalQueue.filter(s => s.id !== id);
       return {
         statusCode: 200,
         headers: corsHeaders(),
         body: JSON.stringify({ success: true })
       };
-
     } catch (err) {
       return {
         statusCode: 500,
