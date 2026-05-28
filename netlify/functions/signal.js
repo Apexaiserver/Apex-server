@@ -1,62 +1,124 @@
-let currentSignal = null;
-let confirmations = [];
+// ─────────────────────────────────────────────
+//  APEX AI — Netlify Signal Bridge Function
+//  Uses Netlify Blobs — NO external services
+//  NO API keys needed. Just deploy and go.
+// ─────────────────────────────────────────────
 
-exports.handler = async (event) => {
-  const headers = {
+const { getStore } = require('@netlify/blobs');
+
+exports.handler = async function(event) {
+
+  // ── CORS preflight ──────────────────────────
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers: corsHeaders(), body: '' };
+  }
+
+  const store = getStore('apex-signals');
+
+  // ── GET: EA polls for pending signals ───────
+  if (event.httpMethod === 'GET') {
+    try {
+      const raw = await store.get('queue');
+      const queue = raw ? JSON.parse(raw) : [];
+      return {
+        statusCode: 200,
+        headers: corsHeaders(),
+        body: JSON.stringify(queue)
+      };
+    } catch (err) {
+      return {
+        statusCode: 500,
+        headers: corsHeaders(),
+        body: JSON.stringify({ error: err.message })
+      };
+    }
+  }
+
+  // ── POST: Web app sends a new trade signal ──
+  if (event.httpMethod === 'POST') {
+    try {
+      const signal = JSON.parse(event.body);
+
+      if (!signal.symbol || !signal.action) {
+        return {
+          statusCode: 400,
+          headers: corsHeaders(),
+          body: JSON.stringify({ error: 'Missing symbol or action' })
+        };
+      }
+
+      // Read current queue
+      const raw = await store.get('queue');
+      const queue = raw ? JSON.parse(raw) : [];
+
+      const newSignal = {
+        id: Date.now().toString(),
+        symbol: signal.symbol,
+        action: signal.action.toUpperCase(),
+        lot: parseFloat(signal.lot) || 0.01,
+        trades: parseInt(signal.trades) || 1,
+        sl: parseFloat(signal.sl) || 0,
+        tp: parseFloat(signal.tp) || 0,
+        entry: signal.entry || 'MARKET',
+        comment: 'APEX AI',
+        timestamp: new Date().toISOString(),
+        status: 'PENDING'
+      };
+
+      queue.push(newSignal);
+      await store.set('queue', JSON.stringify(queue));
+
+      return {
+        statusCode: 200,
+        headers: corsHeaders(),
+        body: JSON.stringify({ success: true, id: newSignal.id })
+      };
+
+    } catch (err) {
+      return {
+        statusCode: 500,
+        headers: corsHeaders(),
+        body: JSON.stringify({ error: err.message })
+      };
+    }
+  }
+
+  // ── DELETE: EA marks signal as done ─────────
+  if (event.httpMethod === 'DELETE') {
+    try {
+      const { id } = JSON.parse(event.body);
+
+      const raw = await store.get('queue');
+      const queue = raw ? JSON.parse(raw).filter(s => s.id !== id) : [];
+      await store.set('queue', JSON.stringify(queue));
+
+      return {
+        statusCode: 200,
+        headers: corsHeaders(),
+        body: JSON.stringify({ success: true })
+      };
+
+    } catch (err) {
+      return {
+        statusCode: 500,
+        headers: corsHeaders(),
+        body: JSON.stringify({ error: err.message })
+      };
+    }
+  }
+
+  return {
+    statusCode: 405,
+    headers: corsHeaders(),
+    body: JSON.stringify({ error: 'Method not allowed' })
+  };
+};
+
+function corsHeaders() {
+  return {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
     'Content-Type': 'application/json'
   };
-
-  if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers, body: '' };
-  }
-
-  if (event.httpMethod === 'GET') {
-    const type = (event.queryStringParameters || {}).type;
-    if (type === 'confirmations') {
-      return { statusCode: 200, headers, body: JSON.stringify({ confirmations: confirmations.slice(-20) }) };
-    }
-    return { statusCode: 200, headers, body: JSON.stringify({ signal: currentSignal }) };
-  }
-
-  if (event.httpMethod === 'POST') {
-    let body = {};
-    try { body = JSON.parse(event.body || '{}'); } catch(e) {}
-
-    if (body.type === 'trade_confirm') {
-      confirmations.push({ ...body, time: new Date().toISOString() });
-      if (confirmations.length > 50) confirmations = confirmations.slice(-50);
-      return { statusCode: 200, headers, body: JSON.stringify({ ok: true }) };
-    }
-
-    if (body.type === 'trade_closed') {
-      confirmations.push({ ...body, closed: true, time: new Date().toISOString() });
-      if (confirmations.length > 50) confirmations = confirmations.slice(-50);
-      return { statusCode: 200, headers, body: JSON.stringify({ ok: true }) };
-    }
-
-    const { action, symbol, sl, tp, lot, trades } = body;
-    if (!action || !symbol) {
-      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing action or symbol' }) };
-    }
-
-    currentSignal = {
-      id: Date.now().toString(),
-      action: action.toUpperCase(),
-      symbol: symbol.toUpperCase(),
-      sl: parseFloat(sl) || 0,
-      tp: parseFloat(tp) || 0,
-      lot: parseFloat(lot) || 0.01,
-      trades: parseInt(trades) || 1,
-      time: new Date().toISOString()
-    };
-
-    setTimeout(() => { currentSignal = null; }, 30000);
-
-    return { statusCode: 200, headers, body: JSON.stringify({ ok: true, signal: currentSignal }) };
-  }
-
-  return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
-};
+}
